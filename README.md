@@ -10,3 +10,7 @@ does not occur in [timeout] ms, an error is logged.
 Since the NMEA bus may be powered off, which would not indicate the problem, a "keystone' path can be defined, 
 which when it timesout indicates that the entire bus is down; making it much easier to search through logs to
 see what was a true timeout and what was just the bus being powered off.
+
+The timout period for the "Keystone path" may be longer than any of the monitored paths, so if a possible
+outage is detected, the plugin will wait for Keystone-timeout time to make sure this isn't a bus power down
+event.  Doing so prevents erroneous logs from being created when a bus is powered down.
