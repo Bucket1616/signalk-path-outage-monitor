@@ -1,8 +1,8 @@
-// file: index.js
+// index.js
 "use strict";
 
 const PLUGIN_ID = "signalk-path-outage-monitor";
-const PLUGIN_NAME = "Path outage monitor (per-path timeouts)";
+const PLUGIN_NAME = "Path Outage Monitor";
 
 module.exports = function (app) {
   let unsubscribes = [];
@@ -10,23 +10,12 @@ module.exports = function (app) {
   let monitors = [];
 
   // Keystone (bus health) tracking
-  let keystone = null;     // { path, timeoutMs, lastUpdate, inOutage, outageStart }
+  let keystone = null;     // { path, source, timeoutMs, lastUpdate, inOutage, outageStart }
   let keystoneUnsub = null;
   let pluginStartedAt = Date.now();
 
-  // Per path we track:
-  // {
-  //   path: string,
-  //   timeoutMs: number,
-  //   lastUpdate: number|null,
-  //   inOutage: boolean,
-  //   outageStart: number|null
-  // }
-  let monitors = [];
-
   function start(props) {
     stop(); // clean restart
-
     pluginStartedAt = Date.now();
 
     // --- Keystone setup ---
@@ -34,11 +23,13 @@ module.exports = function (app) {
     keystoneUnsub = null;
 
     const ksPath = props.keystonePath;
+    const ksSource = props.keystoneSource || null;
     const ksTimeoutMs = (props.keystoneTimeoutSeconds || 0) * 1000;
 
     if (ksPath && ksTimeoutMs > 0) {
       keystone = {
         path: ksPath,
+        source: ksSource,
         timeoutMs: ksTimeoutMs,
         lastUpdate: null,
         inOutage: false,
@@ -46,14 +37,21 @@ module.exports = function (app) {
       };
 
       try {
-        const ksStream = app.streambundle.getSelfStream(keystone.path);
-        keystoneUnsub = ksStream.onValue(v => {
+        let ksStream;
+        if (ksSource && app.streambundle.getSourceStream) {
+          ksStream = app.streambundle.getSourceStream(ksSource, keystone.path);
+        } else {
+          ksStream = app.streambundle.getSelfStream(keystone.path);
+        }
+
+        keystoneUnsub = ksStream.onValue(() => {
           const now = Date.now();
           // Recovery from bus-down
           if (keystone.inOutage) {
             const durationMs = now - (keystone.outageStart || now);
             app.error(
-              `${PLUGIN_ID}: N2K BUS RECOVERED keystone=${keystone.path} outage=${(durationMs / 1000).toFixed(1)}s`
+              `${PLUGIN_ID}: N2K BUS RECOVERED keystone=${keystone.path}` +
+              ` outage=${(durationMs / 1000).toFixed(1)}s`
             );
             keystone.inOutage = false;
             keystone.outageStart = null;
@@ -61,7 +59,11 @@ module.exports = function (app) {
           keystone.lastUpdate = now;
         });
       } catch (e) {
-        app.error(`${PLUGIN_ID}: failed to subscribe keystone ${ksPath}: ${e.message || e}`);
+        app.error(
+          `${PLUGIN_ID}: failed to subscribe keystone ${ksPath}` +
+          (ksSource ? ` (source=${ksSource})` : "") +
+          `: ${e.message || e}`
+        );
       }
     }
 
@@ -70,6 +72,7 @@ module.exports = function (app) {
       .filter(m => m && typeof m.path === "string" && m.path.length > 0)
       .map(m => ({
         path: m.path,
+        source: m.source || null,
         timeoutMs: (m.timeoutSeconds || 0) * 1000,
         lastUpdate: null,
         inOutage: false,
@@ -83,18 +86,26 @@ module.exports = function (app) {
       return;
     }
 
-    // Subscribe to each monitored path
+    // Subscribe to each monitored path (optionally by source)
     monitors.forEach(mon => {
       try {
-        const stream = app.streambundle.getSelfStream(mon.path);
-        const unsub = stream.onValue(v => {
+        let stream;
+        if (mon.source && app.streambundle.getSourceStream) {
+          stream = app.streambundle.getSourceStream(mon.source, mon.path);
+        } else {
+          stream = app.streambundle.getSelfStream(mon.path);
+        }
+
+        const unsub = stream.onValue(() => {
           const now = Date.now();
 
           // If we were in a logged outage, this is recovery
           if (mon.inOutage) {
             const durationMs = now - (mon.outageStart || now);
             app.error(
-              `${PLUGIN_ID}: OUTAGE END path=${mon.path} duration=${(durationMs / 1000).toFixed(1)}s`
+              `${PLUGIN_ID}: OUTAGE END path=${mon.path}` +
+              (mon.source ? ` source=${mon.source}` : "") +
+              ` duration=${(durationMs / 1000).toFixed(1)}s`
             );
             mon.inOutage = false;
             mon.outageStart = null;
@@ -108,7 +119,11 @@ module.exports = function (app) {
         });
         unsubscribes.push(unsub);
       } catch (e) {
-        app.error(`${PLUGIN_ID}: failed to subscribe to ${mon.path}: ${e.message || e}`);
+        app.error(
+          `${PLUGIN_ID}: failed to subscribe to ${mon.path}` +
+          (mon.source ? ` (source=${mon.source})` : "") +
+          `: ${e.message || e}`
+        );
       }
     });
 
@@ -155,7 +170,10 @@ module.exports = function (app) {
           : now - keystoneAge + keystone.timeoutMs;
 
         app.error(
-          `${PLUGIN_ID}: N2K BUS DOWN (keystone=${keystone.path}) age=${(keystoneAge / 1000).toFixed(1)}s timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
+          `${PLUGIN_ID}: N2K BUS DOWN (keystone=${keystone.path}` +
+          (keystone.source ? ` source=${keystone.source}` : "") +
+          `) age=${(keystoneAge / 1000).toFixed(1)}s` +
+          ` timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
         );
       }
     }
@@ -172,7 +190,7 @@ module.exports = function (app) {
         age = now - mon.lastUpdate;
       }
 
-      // 1) If already in logged outage, nothing to do here; recovery is handled in onValue
+      // 1) If already in logged outage, nothing to do here; recovery is in onValue
       if (mon.inOutage) {
         return;
       }
@@ -190,18 +208,19 @@ module.exports = function (app) {
 
       // 3) If pending, decide once keystone decision window has elapsed
       if (mon.pendingOutage) {
-        const keystoneTimeoutMs = keystone && keystone.timeoutMs > 0
-          ? keystone.timeoutMs
-          : 0;
+        const keystoneTimeoutMs =
+          keystone && keystone.timeoutMs > 0 ? keystone.timeoutMs : 0;
 
-        // If we have no keystone configured, treat as simple “log immediately once pending”
+        // If we have no keystone configured, classify immediately
         if (!keystone || keystoneTimeoutMs === 0) {
-          // No keystone -> immediate classification
           mon.inOutage = true;
           mon.pendingOutage = false;
           mon.pendingSince = null;
           app.error(
-            `${PLUGIN_ID}: OUTAGE START path=${mon.path} (no keystone) age=${(age / 1000).toFixed(1)}s timeout=${(mon.timeoutMs / 1000).toFixed(1)}s`
+            `${PLUGIN_ID}: OUTAGE START path=${mon.path}` +
+            (mon.source ? ` source=${mon.source}` : "") +
+            ` (no keystone) age=${(age / 1000).toFixed(1)}s` +
+            ` timeout=${(mon.timeoutMs / 1000).toFixed(1)}s`
           );
           return;
         }
@@ -212,8 +231,7 @@ module.exports = function (app) {
           return;
         }
 
-        // Decision time: look at keystone age
-        // Recompute keystoneAge if we have it
+        // Decision time: look at keystone age now
         let currentKeystoneAge = keystoneAge;
         if (currentKeystoneAge == null && keystone && keystone.timeoutMs > 0) {
           if (keystone.lastUpdate == null) {
@@ -223,13 +241,16 @@ module.exports = function (app) {
           }
         }
 
-        const ksTimout = keystone.timeoutMs;
+        const ksTimeout = keystone.timeoutMs;
 
-        if (currentKeystoneAge != null && currentKeystoneAge > ksTimout) {
+        if (
+          currentKeystoneAge != null &&
+          currentKeystoneAge > ksTimeout
+        ) {
           // Keystone also effectively out -> bus-down classification; suppress per-path log
           mon.pendingOutage = false;
           mon.pendingSince = null;
-          mon.outageStart = null; // this one was bus-induced, not a real independent outage
+          mon.outageStart = null; // bus-induced, not independent outage
           return;
         } else {
           // Keystone alive -> real sensor outage
@@ -238,7 +259,10 @@ module.exports = function (app) {
           mon.pendingSince = null;
 
           app.error(
-            `${PLUGIN_ID}: OUTAGE START path=${mon.path} age=${(age / 1000).toFixed(1)}s timeout=${(mon.timeoutMs / 1000).toFixed(1)}s (keystone alive)`
+            `${PLUGIN_ID}: OUTAGE START path=${mon.path}` +
+            (mon.source ? ` source=${mon.source}` : "") +
+            ` age=${(age / 1000).toFixed(1)}s` +
+            ` timeout=${(mon.timeoutMs / 1000).toFixed(1)}s (keystone alive)`
           );
           return;
         }
@@ -250,20 +274,28 @@ module.exports = function (app) {
     id: PLUGIN_ID,
     name: PLUGIN_NAME,
     description:
-      "Monitors up to 10 Signal K paths. If time between deltas exceeds a per-path timeout, logs outage start and end with duration.",
+      "Monitors up to 10 Signal K paths. If time between deltas exceeds a per-path timeout, logs outages; uses a keystone path to suppress bus-off events.",
     schema: {
       type: "object",
       properties: {
         keystonePath: {
           type: "string",
           title: "Keystone path (indicates N2K bus is alive)",
-          description: "Example: a stable N2K-based path like navigation.speedOverGround",
+          description:
+            "Example: a stable N2K-based path like navigation.speedOverGround",
           default: "navigation.speedOverGround"
+        },
+        keystoneSource: {
+          type: "string",
+          title: "Optional keystone source",
+          description:
+            "If set, only deltas from this source are used to detect bus state (e.g. n2k-from-file.serial)"
         },
         keystoneTimeoutSeconds: {
           type: "number",
           title: "Keystone timeout (seconds)",
-          description: "If no deltas on keystone for this long, treat N2K bus as down",
+          description:
+            "If no deltas on keystone for this long, treat N2K bus as down",
           default: 10
         },
         monitors: {
@@ -276,11 +308,19 @@ module.exports = function (app) {
             properties: {
               path: {
                 type: "string",
-                title: "Signal K path to monitor (e.g. navigation.headingTrue)"
+                title:
+                  "Signal K path to monitor (e.g. navigation.headingTrue)"
+              },
+              source: {
+                type: "string",
+                title: "Optional source",
+                description:
+                  "If set, only deltas from this source are monitored (e.g. n2k-from-ais.ttyUSB0)"
               },
               timeoutSeconds: {
                 type: "number",
-                title: "Path timeout (seconds)",
+                title:
+                  "Path timeout (seconds) between deltas before flagging outage",
                 default: 10
               }
             }
@@ -300,9 +340,6 @@ module.exports = function (app) {
       return "Running";
     }
   };
-
-  // track when plugin was loaded (for initial-no-data logic)
-  app.startedAt = Date.now();
 
   return plugin;
 };
