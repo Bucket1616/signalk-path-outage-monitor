@@ -57,6 +57,14 @@ module.exports = function (app) {
 
         keystoneUnsub = ksStream.onValue(() => {
           const now = Date.now();
+
+          // First keystone seen
+          if (keystone.lastUpdate === null) {
+            app.debug(
+              `${PLUGIN_ID}: first value for keystone path=${keystone.path}` +
+              (keystone.source ? ` source=${keystone.source}` : "")
+            );          
+          }
           // Recovery from bus-down
           if (keystone.inOutage) {
             const durationMs = now - (keystone.outageStart || now);
@@ -124,6 +132,13 @@ module.exports = function (app) {
         const unsub = stream.onValue(() => {
           const now = Date.now();
 
+          // First Time Monitored path seen
+          if (mon.lastUpdate === null) {
+            app.debug(
+              `${PLUGIN_ID}: first value for path=${mon.path}` +
+              (mon.source ? ` source=${mon.source}` : "")
+            );
+          }
           // If we were in a logged outage, this is recovery
           if (mon.inOutage) {
             const durationMs = now - (mon.outageStart || now);
