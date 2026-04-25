@@ -7,20 +7,20 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Buket1616/signalk-path-outage-monitor.git"
+    "url": "git+https://github.com/Bucket1616/signalk-path-outage-monitor.git"
   },
   "bugs": {
     "url": "https://github.com/Bucket1616/signalk-path-outage-monitor/issues"
   },
   "homepage": "https://github.com/Bucket1616/signalk-path-outage-monitor#readme",
-  "keywords": 
+  "keywords": [
     "signalk",
     "signalk-node-server-plugin",
     "nmea",
     "monitoring",
     "outage",
     "diagnostics"
-  ,
+  ],
   "engines": {
     "node": ">=18.0.0"
   },
@@ -31,12 +31,12 @@
     "version": "0.0.1",
     "author": "Michael Pail",
     "license": "MIT",
-    "keywords": 
+    "keywords": [
       "monitoring",
       "diagnostics",
       "outage",
       "timing"
+    ]
   },
-  "dependencies": {
-  }
+  "dependencies": {}
 }
