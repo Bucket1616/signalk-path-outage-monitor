@@ -34,11 +34,11 @@ module.exports = function (app) {
         lastUpdate: null,
         inOutage: false,
         outageStart: null
-        app.debug(
-         `${PLUGIN_ID}: keystone configured path=${keystone.path}` +
-          (keystone.source ? ` source=${keystone.source}` : "") +
-          ` timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
-        };
+      };
+      app.debug(
+       `${PLUGIN_ID}: keystone configured path=${keystone.path}` +
+        (keystone.source ? ` source=${keystone.source}` : "") +
+        ` timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
       };
 
       try {
