@@ -34,13 +34,24 @@ module.exports = function (app) {
         lastUpdate: null,
         inOutage: false,
         outageStart: null
+        app.debug(
+         `${PLUGIN_ID}: keystone configured path=${keystone.path}` +
+          (keystone.source ? ` source=${keystone.source}` : "") +
+          ` timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
+        };
       };
 
       try {
         let ksStream;
         if (ksSource && app.streambundle.getSourceStream) {
+          app.debug(
+            `${PLUGIN_ID}: subscribing keystone to getSourceStream(${ksSource}, ${keystone.path})`
+          );
           ksStream = app.streambundle.getSourceStream(ksSource, keystone.path);
         } else {
+          app.debug(
+            `${PLUGIN_ID}: subscribing keystone to getSelfStream(${keystone.path})`
+          );
           ksStream = app.streambundle.getSelfStream(keystone.path);
         }
 
@@ -80,6 +91,14 @@ module.exports = function (app) {
         pendingOutage: false,
         pendingSince: null
       }));
+    app.debug(
+      `${PLUGIN_ID}: configured ${monitors.length} monitors: ` +
+      monitors.map(m =>
+        `${m.path}` +
+        (m.source ? `@${m.source}` : "") +
+        `(${(m.timeoutMs / 1000).toFixed(1)}s)`
+      ).join(", ")
+    );
 
     if (monitors.length === 0) {
       app.debug(`${PLUGIN_ID}: no monitors configured`);
@@ -91,8 +110,14 @@ module.exports = function (app) {
       try {
         let stream;
         if (mon.source && app.streambundle.getSourceStream) {
+          app.debug(
+            `${PLUGIN_ID}: subscribing monitor to getSourceStream(${mon.source}, ${mon.path})`
+          );
           stream = app.streambundle.getSourceStream(mon.source, mon.path);
         } else {
+          app.debug(
+            `${PLUGIN_ID}: subscribing monitor to getSelfStream(${mon.path})`
+          );
           stream = app.streambundle.getSelfStream(mon.path);
         }
 
