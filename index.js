@@ -39,7 +39,7 @@ module.exports = function (app) {
        `${PLUGIN_ID}: keystone configured path=${keystone.path}` +
         (keystone.source ? ` source=${keystone.source}` : "") +
         ` timeout=${(keystone.timeoutMs / 1000).toFixed(1)}s`
-      };
+      );
 
       try {
         let ksStream;
